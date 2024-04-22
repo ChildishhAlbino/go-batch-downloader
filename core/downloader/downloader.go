@@ -71,9 +71,9 @@ func HandleDownload(url string, outName string, wg *sync.WaitGroup, ch chan<- Do
 		log.Fatalf("Error while downloading: %v", err)
 		return err
 	}
-	fmt.Println("Renaming file")
+
 	os.Rename(tempPath, outName)
-	fmt.Println("Renamed file")
+
 	Mutex.Lock()
 	delete(downloads, url)
 	Mutex.Unlock()

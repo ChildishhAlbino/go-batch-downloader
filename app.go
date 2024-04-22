@@ -18,11 +18,12 @@ var newItems = map[string]downloader.DownloadItem{}
 var longestFileName int = 0
 
 func main() {
+	start := time.Now()
 	urls := GetUrlsFromFile("./files.txt")
 	numUrls := len(urls)
 	fmt.Println("Found", numUrls, "urls")
 	bufferSize := runtime.NumCPU() * numUrls
-	messages := make(chan downloader.DownloadItem, bufferSize)
+	messageChannel := make(chan downloader.DownloadItem, bufferSize)
 
 	var wg sync.WaitGroup
 	for _, Url := range urls {
@@ -36,37 +37,38 @@ func main() {
 		}
 		fmt.Println(fileName)
 		wg.Add(1)
-		go downloader.HandleDownload(Url, fileName, &wg, messages)
+		go downloader.HandleDownload(Url, fileName, &wg, messageChannel)
 	}
-	for {
-		time.Sleep(20 * time.Millisecond)
-		fmt.Printf("\n----------------------\n")
+
+	go func() {
+		wg.Wait()
+		close(messageChannel)
+	}()
+
+	for msg := range messageChannel {
 		os.Stdout.WriteString("\x1b[3;J\x1b[H\x1b[2J")
 		_, err := downloader.GetDownloads()
 		if err != nil {
 			fmt.Println("All downloads finished...")
 			break
 		}
-		totalMessages := len(messages)
-		for len(messages) > 0 {
-			msg := <-messages
-			if msg.BytesDownloaded == msg.TotalSize {
-				delete(newItems, msg.Url)
-				continue
-			}
-			newItems[msg.Url] = msg
+		if msg.BytesDownloaded == msg.TotalSize {
+			delete(newItems, msg.Url)
+			continue
 		}
+		newItems[msg.Url] = msg
 		sortedKeys := GetSortedListOfKeysFromMap(newItems)
-		fmt.Printf("Downloading %v items... (Processed %v (bufferSize=%v) messages since last update)\n", len(sortedKeys), totalMessages, bufferSize)
-		fmt.Println("-----------------")
+		fmt.Printf("Downloading %v items...\n", len(sortedKeys))
+		fmt.Println(strings.Repeat("-", longestFileName+2))
 		for _, key := range sortedKeys {
 			item := newItems[key]
-			fmt.Printf("%-*s: %.3fMB OF %.3fMB\n", longestFileName+2, item.FileName, AsMegabytes(item.BytesDownloaded), AsMegabytes(item.TotalSize))
+			fmt.Printf("%-*s: %.2fMB / %.2fMB\n", longestFileName+2, item.FileName, AsMegabytes(item.BytesDownloaded), AsMegabytes(item.TotalSize))
 		}
+		fmt.Println(strings.Repeat("-", longestFileName+2))
+		elapsed := time.Since(start).Round(time.Second)
+		fmt.Printf("Total duration: %s\n", elapsed)
 	}
 
-	wg.Wait()
-	close(messages)
 	fmt.Println("Finished")
 }
 
