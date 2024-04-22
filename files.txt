@@ -1,0 +1,2 @@
+https://ash-speed.hetzner.com/100MB.bin
+https://ash-speed.hetzner.com/1GB.bin
