@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 )
 
 var downloads map[string]DownloadItem = make(map[string]DownloadItem)
@@ -51,7 +52,13 @@ func HandleDownload(url string, outName string, wg *sync.WaitGroup, ch chan<- Do
 	defer wg.Done()
 	tempPath := fmt.Sprintf(".tmp_%s", outName)
 	req, _ := http.NewRequest("GET", url, nil)
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if(err != nil){
+		log.Fatalf("Error while downloading: %v", err)
+		core.ErrorChannel <- err.Error()
+		time.Sleep(20 * time.Second)
+		return err
+	}
 	if resp.StatusCode != 200 {
 		log.Fatalf("Error while downloading: %v", resp.StatusCode)
 	}
@@ -69,11 +76,12 @@ func HandleDownload(url string, outName string, wg *sync.WaitGroup, ch chan<- Do
 	if _, err := io.Copy(outputFile, progressReader); err != nil {
 		log.Fatalf("Error while downloading: %v", err)
 		core.ErrorChannel <- err.Error()
+		time.Sleep(20 * time.Second)
 		return err
 	}
 	// Do this instead of deferring closure as Windows doesn't allow renames while another process has the file 'open'
 	outputFile.Close()
-	err := os.Rename(tempPath, outName)
+	err = os.Rename(tempPath, outName)
 	core.Check(err)
 	downloadMapMutex.Lock()
 	delete(downloads, url)
