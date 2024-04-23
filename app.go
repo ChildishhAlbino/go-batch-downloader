@@ -19,14 +19,15 @@ var outputChannel = make(chan string, runtime.NumCPU())
 var lastOutputTimestamp = time.Now()
 
 func main() {
+	var wg sync.WaitGroup
 	start := time.Now()
+	go core.HandleErrorLog()
+
 	urls := GetUrlsFromFile("./files.txt")
 	numUrls := len(urls)
-	fmt.Println("Found", numUrls, "urls")
 	bufferSize := runtime.NumCPU() * numUrls * 10
 	messageChannel := make(chan downloader.DownloadItem, bufferSize)
-
-	var wg sync.WaitGroup
+	
 	for _, Url := range urls {
 		parsed, err := url.Parse(Url)
 		core.Check(err)
@@ -36,9 +37,9 @@ func main() {
 		if length > longestFileName {
 			longestFileName = length
 		}
-		fmt.Println(fileName)
 		wg.Add(1)
 		go downloader.HandleDownload(Url, fileName, &wg, messageChannel)
+		outputChannel <- GetOutputText(start)
 	}
     go func () {
         for msg := range outputChannel {
@@ -46,11 +47,12 @@ func main() {
             fmt.Print(msg)
         }
     }()
-
+	
 	go func() {
 		wg.Wait()
 		close(messageChannel)
         close(outputChannel)
+		close(core.ErrorChannel)
 	}()
 
 	for msg := range messageChannel {

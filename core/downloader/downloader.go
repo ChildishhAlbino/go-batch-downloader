@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"batch-downloader/core"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +12,7 @@ import (
 )
 
 var downloads map[string]DownloadItem = make(map[string]DownloadItem)
-var Mutex = &sync.RWMutex{}
+var downloadMapMutex = &sync.RWMutex{}
 
 type ProgressReader struct {
 	Reader io.Reader
@@ -44,12 +45,11 @@ func GetDownloads() (map[string]DownloadItem, error) {
 }
 
 func HandleDownload(url string, outName string, wg *sync.WaitGroup, ch chan<- DownloadItem) error {
-	Mutex.Lock()
+	downloadMapMutex.Lock()
 	downloads[url] = DownloadItem{FileName: outName, Url: url}
-	Mutex.Unlock()
+	downloadMapMutex.Unlock()
 	defer wg.Done()
 	tempPath := fmt.Sprintf(".tmp_%s", outName)
-	fmt.Println("Downloading to temporary path", tempPath)
 	req, _ := http.NewRequest("GET", url, nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 200 {
@@ -57,8 +57,7 @@ func HandleDownload(url string, outName string, wg *sync.WaitGroup, ch chan<- Do
 	}
 	defer resp.Body.Close()
 
-	f, _ := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY, 0644)
-	defer f.Close()
+	outputFile, _ := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY, 0644)
 
 	progressReader := &ProgressReader{
 		Reader: resp.Body,
@@ -67,16 +66,18 @@ func HandleDownload(url string, outName string, wg *sync.WaitGroup, ch chan<- Do
 		Ch:     ch,
 	}
 
-	if _, err := io.Copy(f, progressReader); err != nil {
+	if _, err := io.Copy(outputFile, progressReader); err != nil {
 		log.Fatalf("Error while downloading: %v", err)
+		core.ErrorChannel <- err.Error()
 		return err
 	}
-
-	os.Rename(tempPath, outName)
-
-	Mutex.Lock()
+	// Do this instead of deferring closure as Windows doesn't allow renames while another process has the file 'open'
+	outputFile.Close()
+	err := os.Rename(tempPath, outName)
+	core.Check(err)
+	downloadMapMutex.Lock()
 	delete(downloads, url)
-	Mutex.Unlock()
+	downloadMapMutex.Unlock()
 	return nil
 }
 
